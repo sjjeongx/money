@@ -39,7 +39,7 @@ function loadState() {
 }
 
 function defaultState() {
-  return { entries: [], budgets: {}, recurring: [], accounts: [...DEFAULT_ACCS], savingsGoal: 0, darkMode: false };
+  return { entries: [], budgets: {}, recurring: [], accounts: [...DEFAULT_ACCS], savingsGoal: 0, darkMode: false, openaiKey: '' };
 }
 
 function ensureDefaults(s) {
@@ -49,6 +49,7 @@ function ensureDefaults(s) {
   s.accounts    = s.accounts    || [...DEFAULT_ACCS];
   s.savingsGoal = s.savingsGoal || 0;
   s.darkMode    = s.darkMode    || false;
+  s.openaiKey   = s.openaiKey   || '';
   return s;
 }
 
@@ -421,6 +422,19 @@ function renderBudget() {
 function renderSettings() {
   document.getElementById('dark-mode-toggle').checked = state.darkMode;
 
+  // API key status
+  const keyInput  = document.getElementById('openai-key-input');
+  const keyStatus = document.getElementById('openai-key-status');
+  if (state.openaiKey) {
+    keyInput.value = state.openaiKey;
+    keyStatus.textContent = '✓ API 키가 저장되어 있습니다.';
+    keyStatus.style.color = 'var(--income)';
+  } else {
+    keyInput.value = '';
+    keyStatus.textContent = 'API 키를 입력하면 AI 기능을 사용할 수 있습니다.';
+    keyStatus.style.color = 'var(--text-3)';
+  }
+
   const accList = document.getElementById('account-list');
   accList.innerHTML = state.accounts.map((a, i) => `
     <div class="account-item">
@@ -538,7 +552,41 @@ function parseCSVRow(line) {
 }
 
 /* ══════════════════════════════════════════════════
-   AI — 자연어 입력 (ai-parse)
+   AI — OpenAI 직접 호출 헬퍼
+══════════════════════════════════════════════════ */
+async function callOpenAI({ messages, json = false, maxTokens = 500 }) {
+  const key = state.openaiKey && state.openaiKey.trim();
+  if (!key) throw new Error('설정 탭에서 OpenAI API 키를 먼저 입력해주세요.');
+
+  const body = {
+    model: 'gpt-4o-mini',
+    messages,
+    temperature: json ? 0.1 : 0.7,
+    max_tokens: maxTokens,
+  };
+  if (json) body.response_format = { type: 'json_object' };
+
+  const res = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${key}`,
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    const msg = err.error?.message || `API 오류 (${res.status})`;
+    throw new Error(msg);
+  }
+
+  const data = await res.json();
+  return data.choices[0].message.content;
+}
+
+/* ══════════════════════════════════════════════════
+   AI — 자연어 입력
 ══════════════════════════════════════════════════ */
 async function aiParse() {
   const text = document.getElementById('ai-text').value.trim();
@@ -547,26 +595,46 @@ async function aiParse() {
   const btn    = document.getElementById('ai-parse-btn');
   const result = document.getElementById('ai-parse-result');
 
-  // Loading state
   btn.disabled = true;
   btn.innerHTML = '<span class="ai-spinner"></span>';
   result.className = 'ai-parse-result';
   result.style.display = 'none';
 
+  const todayISO = todayString();
+
   try {
-    const res  = await fetch('/.netlify/functions/ai-parse', {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ text }),
+    const content = await callOpenAI({
+      json: true,
+      maxTokens: 300,
+      messages: [
+        {
+          role: 'system',
+          content: `당신은 가계부 앱의 자연어 입력 파서입니다. 입력 텍스트를 분석해 JSON으로 반환하세요.
+
+오늘 날짜: ${todayISO}
+
+반환 형식 (JSON만, 설명 없음):
+{"date":"YYYY-MM-DD","type":"income 또는 expense","category":"식비|교통|쇼핑|의료|문화|주거|급여|용돈|기타 중 하나","description":"항목명","amount":정수,"memo":"","tags":[]}
+
+규칙:
+- 날짜 미언급 시 오늘 사용. "어제"→-1일, "그제"→-2일
+- 금액은 반드시 정수(원 단위). "1만2천"→12000, "3.5만"→35000
+- 수입: 월급/급여/용돈/입금/받았다 → income, 나머지 → expense
+- category는 반드시 목록 중 하나
+- 파싱 불가 시 {"error":"이유"} 반환`,
+        },
+        { role: 'user', content: text },
+      ],
     });
 
-    const data = await res.json();
+    const parsed = JSON.parse(content);
 
-    if (!res.ok || data.error) {
-      throw new Error(data.error || '파싱에 실패했습니다.');
+    if (parsed.error) throw new Error(parsed.error);
+    if (!parsed.date || !parsed.type || !parsed.category || !parsed.description || !(parsed.amount > 0)) {
+      throw new Error('입력 내용을 인식하지 못했습니다. 더 자세히 입력해주세요.');
     }
 
-    showParsePreview(data);
+    showParsePreview(parsed);
   } catch (err) {
     result.className = 'ai-parse-result error visible';
     result.innerHTML = `오류: ${esc(err.message)}`;
@@ -634,55 +702,73 @@ function applyParsedToForm(data) {
 }
 
 /* ══════════════════════════════════════════════════
-   AI — 지출 분석 (ai-analyze)
+   AI — 지출 분석
 ══════════════════════════════════════════════════ */
 async function aiAnalyze() {
-  const btn  = document.getElementById('ai-analyze-btn');
-  const body = document.getElementById('ai-analysis-body');
+  const btn      = document.getElementById('ai-analyze-btn');
+  const bodyEl   = document.getElementById('ai-analysis-body');
 
   btn.disabled = true;
   btn.innerHTML = '<span class="ai-spinner"></span>';
-  body.innerHTML = '<p class="text-muted" style="text-align:center;padding:16px">분석 중입니다...</p>';
+  bodyEl.innerHTML = '<p class="text-muted" style="text-align:center;padding:20px">분석 중입니다...</p>';
 
-  // Build summary data to send (don't expose all raw data)
   const entries = monthEntries();
-  const catMap  = {};
+
+  if (entries.length === 0) {
+    bodyEl.innerHTML = '<p class="text-muted ai-placeholder">이번 달 등록된 내역이 없습니다.</p>';
+    btn.disabled = false;
+    btn.innerHTML = '<span class="btn-ai-icon">✦</span> 분석 생성';
+    return;
+  }
+
+  const catMap = {};
   entries.filter(e => e.type === 'expense').forEach(e => {
     catMap[e.category] = (catMap[e.category] || 0) + e.amount;
   });
 
-  const payload = {
-    month:     currentMonth,
-    income:    sumType(entries, 'income'),
-    expense:   sumType(entries, 'expense'),
-    balance:   sumType(entries, 'income') - sumType(entries, 'expense'),
-    budgets:   state.budgets,
-    savingsGoal: state.savingsGoal,
-    categoryBreakdown: catMap,
-    topExpenses: entries
-      .filter(e => e.type === 'expense')
-      .sort((a, b) => b.amount - a.amount)
-      .slice(0, 10)
-      .map(e => ({ date: e.date, category: e.category, description: e.description, amount: e.amount })),
-    count: entries.length,
-  };
+  const income  = sumType(entries, 'income');
+  const expense = sumType(entries, 'expense');
+  const balance = income - expense;
+
+  const overBudget = Object.entries(catMap)
+    .filter(([cat, spent]) => state.budgets[cat] && spent > state.budgets[cat])
+    .map(([cat, spent]) => `${cat}(예산 ${fmt(state.budgets[cat])}원 → ${fmt(spent)}원 사용)`);
+
+  const dataStr = [
+    `분석 월: ${currentMonth}`,
+    `수입: ${fmt(income)}원 / 지출: ${fmt(expense)}원 / 잔액: ${fmt(balance)}원`,
+    `거래 건수: ${entries.length}건`,
+    state.savingsGoal ? `저축 목표: ${fmt(state.savingsGoal)}원 (달성률 ${Math.min(100, Math.round(balance / state.savingsGoal * 100))}%)` : '',
+    `카테고리별 지출: ${JSON.stringify(catMap)}`,
+    overBudget.length ? `예산 초과: ${overBudget.join(', ')}` : '',
+    `상위 지출: ${JSON.stringify(entries.filter(e=>e.type==='expense').sort((a,b)=>b.amount-a.amount).slice(0,8).map(e=>({desc:e.description,cat:e.category,amt:e.amount})))}`,
+  ].filter(Boolean).join('\n');
 
   try {
-    const res  = await fetch('/.netlify/functions/ai-analyze', {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify(payload),
+    const content = await callOpenAI({
+      json: false,
+      maxTokens: 600,
+      messages: [
+        {
+          role: 'system',
+          content: `당신은 친근한 가계부 AI 어시스턴트입니다.
+사용자의 지출 데이터를 분석하고 마크다운으로 간결한 리포트를 작성하세요.
+
+구조 (각 섹션 2-3줄):
+## 이번 달 요약
+## 주요 지출 패턴
+## 절약 포인트
+## 다음 달 제안
+
+규칙: 한국어, 친근한 톤, 구체적 숫자, 전체 400자 이내`,
+        },
+        { role: 'user', content: dataStr },
+      ],
     });
 
-    const data = await res.json();
-
-    if (!res.ok || data.error) {
-      throw new Error(data.error || '분석에 실패했습니다.');
-    }
-
-    body.innerHTML = `<div class="ai-md">${renderMarkdown(data.analysis)}</div>`;
+    bodyEl.innerHTML = `<div class="ai-md">${renderMarkdown(content)}</div>`;
   } catch (err) {
-    body.innerHTML = `<p style="color:var(--expense)">오류: ${esc(err.message)}</p>`;
+    bodyEl.innerHTML = `<p style="color:var(--expense);padding:8px 0">오류: ${esc(err.message)}</p>`;
   } finally {
     btn.disabled = false;
     btn.innerHTML = '<span class="btn-ai-icon">✦</span> 다시 분석';
@@ -806,6 +892,16 @@ function setupListeners() {
   document.getElementById('savings-goal-save').addEventListener('click', () => {
     state.savingsGoal = +document.getElementById('savings-goal-input').value || 0;
     save(); renderBudget();
+  });
+
+  // OpenAI API key
+  document.getElementById('openai-key-save').addEventListener('click', () => {
+    const val = document.getElementById('openai-key-input').value.trim();
+    if (!val) { alert('API 키를 입력해주세요.'); return; }
+    if (!val.startsWith('sk-')) { alert('올바른 OpenAI API 키 형식이 아닙니다. (sk-로 시작해야 합니다)'); return; }
+    state.openaiKey = val;
+    save();
+    renderSettings();
   });
 
   // CSV

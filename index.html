@@ -223,6 +223,19 @@
     <div id="tab-settings" class="tab-content">
 
       <div class="settings-section">
+        <h3>AI 설정</h3>
+        <p style="font-size:0.82rem;color:var(--text-2);margin-bottom:14px;line-height:1.6">
+          OpenAI API 키를 입력하면 자연어 입력·지출 분석 기능을 사용할 수 있습니다.<br>
+          키는 이 기기의 브라우저에만 저장되며 외부로 전송되지 않습니다.
+        </p>
+        <div class="add-row" style="margin-bottom:8px">
+          <input type="password" id="openai-key-input" placeholder="sk-..." autocomplete="off" style="font-family:monospace" />
+          <button class="btn-primary" id="openai-key-save">저장</button>
+        </div>
+        <p id="openai-key-status" style="font-size:0.78rem;color:var(--text-3)"></p>
+      </div>
+
+      <div class="settings-section">
         <h3>테마</h3>
         <label class="toggle-label">
           <span>다크 모드</span>
