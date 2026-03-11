@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>가계부</title>
+  <link rel="stylesheet" href="style.css" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+</head>
+<body>
+  <div class="app">
+
+    <header class="app-header">
+      <h1>가계부</h1>
+    </header>
+
+    <nav class="tab-nav">
+      <button class="tab-btn active" data-tab="home">홈</button>
+      <button class="tab-btn" data-tab="calendar">달력</button>
+      <button class="tab-btn" data-tab="charts">차트</button>
+      <button class="tab-btn" data-tab="budget">예산</button>
+      <button class="tab-btn" data-tab="settings">설정</button>
+    </nav>
+
+    <!-- ── HOME ──────────────────────────────── -->
+    <div id="tab-home" class="tab-content active">
+      <div class="month-nav">
+        <button class="btn-icon" id="prev-month">&#8249;</button>
+        <span id="current-month-label"></span>
+        <button class="btn-icon" id="next-month">&#8250;</button>
+      </div>
+
+      <div class="summary">
+        <div class="card income-card">
+          <span class="label">총 수입</span>
+          <span class="amount" id="total-income">0원</span>
+          <span class="diff" id="income-diff"></span>
+        </div>
+        <div class="card expense-card">
+          <span class="label">총 지출</span>
+          <span class="amount" id="total-expense">0원</span>
+          <span class="diff" id="expense-diff"></span>
+        </div>
+        <div class="card balance-card">
+          <span class="label">잔액</span>
+          <span class="amount" id="balance">0원</span>
+          <span class="diff" id="savings-goal-info"></span>
+        </div>
+      </div>
+
+      <!-- AI 자연어 입력 -->
+      <div class="ai-card" id="ai-input-card">
+        <div class="ai-card-header">
+          <div class="ai-card-title-group">
+            <span class="ai-badge">AI</span>
+            <span class="ai-card-title">자연어로 입력하기</span>
+          </div>
+          <button class="btn-icon ai-collapse-btn" id="ai-collapse-btn" title="접기/펼치기">&#8964;</button>
+        </div>
+        <div class="ai-input-body" id="ai-input-body">
+          <div class="ai-input-row">
+            <textarea id="ai-text" placeholder='예: "어제 점심 짜장면 12,000원"  또는  "이번 달 월급 3,500,000원 입금"' rows="2"></textarea>
+            <button class="btn-ai" id="ai-parse-btn">
+              <span class="btn-ai-icon">✦</span> AI 입력
+            </button>
+          </div>
+          <div class="ai-parse-result" id="ai-parse-result"></div>
+        </div>
+      </div>
+
+      <form class="form" id="entry-form">
+        <div class="form-row">
+          <div class="form-group">
+            <label for="date">날짜</label>
+            <input type="date" id="date" required />
+          </div>
+          <div class="form-group">
+            <label for="type">구분</label>
+            <select id="type">
+              <option value="income">수입</option>
+              <option value="expense">지출</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="category">카테고리</label>
+            <select id="category"></select>
+          </div>
+          <div class="form-group">
+            <label for="account">계좌</label>
+            <select id="account"></select>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group flex-2">
+            <label for="description">항목</label>
+            <input type="text" id="description" placeholder="항목을 입력하세요" required />
+          </div>
+          <div class="form-group flex-1">
+            <label for="amount">금액 (원)</label>
+            <input type="number" id="amount" placeholder="0" min="1" required />
+          </div>
+          <div class="form-group flex-2">
+            <label for="tags">태그</label>
+            <input type="text" id="tags" placeholder="#여행 #경조사" />
+          </div>
+          <div class="form-group flex-2">
+            <label for="memo">메모</label>
+            <input type="text" id="memo" placeholder="메모 (선택)" />
+          </div>
+          <div class="form-group btn-group">
+            <label class="invisible">추가</label>
+            <button type="submit" class="btn-primary">추가</button>
+          </div>
+        </div>
+      </form>
+
+      <div class="filter-bar">
+        <input type="text" id="search" placeholder="항목 검색..." />
+        <select id="filter-type">
+          <option value="all">전체</option>
+          <option value="income">수입</option>
+          <option value="expense">지출</option>
+        </select>
+        <select id="filter-category"><option value="all">카테고리 전체</option></select>
+        <select id="filter-account"><option value="all">계좌 전체</option></select>
+        <button class="btn-outline-danger" id="clear-all">이달 삭제</button>
+      </div>
+
+      <div class="list-header">
+        <span>날짜</span>
+        <span>항목</span>
+        <span>카테고리</span>
+        <span>계좌</span>
+        <span>태그</span>
+        <span>금액</span>
+        <span></span>
+      </div>
+      <ul class="entry-list" id="entry-list"></ul>
+      <p class="empty-msg" id="empty-msg">등록된 내역이 없습니다.</p>
+
+      <div class="toast" id="undo-toast">
+        <span id="undo-msg">항목이 삭제되었습니다.</span>
+        <button id="undo-btn">되돌리기</button>
+      </div>
+    </div>
+
+    <!-- ── CALENDAR ───────────────────────────── -->
+    <div id="tab-calendar" class="tab-content">
+      <div class="month-nav">
+        <button class="btn-icon" id="cal-prev-month">&#8249;</button>
+        <span id="cal-month-label"></span>
+        <button class="btn-icon" id="cal-next-month">&#8250;</button>
+      </div>
+      <div class="calendar" id="calendar"></div>
+      <div class="day-detail" id="day-detail"></div>
+    </div>
+
+    <!-- ── CHARTS ─────────────────────────────── -->
+    <div id="tab-charts" class="tab-content">
+      <div class="chart-grid">
+        <div class="chart-card">
+          <h3>월별 수입 / 지출 (최근 6개월)</h3>
+          <canvas id="chart-monthly"></canvas>
+        </div>
+        <div class="chart-card">
+          <h3>카테고리별 지출 (이번 달)</h3>
+          <div class="chart-wrap"><canvas id="chart-category"></canvas></div>
+        </div>
+        <div class="chart-card chart-full">
+          <h3>잔액 추이 (최근 6개월)</h3>
+          <canvas id="chart-trend"></canvas>
+        </div>
+        <div class="chart-card">
+          <h3>이번 달 통계</h3>
+          <div id="stats-summary" class="stats-grid"></div>
+        </div>
+      </div>
+
+      <!-- AI 지출 분석 -->
+      <div class="ai-card ai-analysis-card">
+        <div class="ai-card-header">
+          <div class="ai-card-title-group">
+            <span class="ai-badge">AI</span>
+            <span class="ai-card-title">이번 달 AI 지출 분석</span>
+          </div>
+          <button class="btn-ai btn-sm" id="ai-analyze-btn">
+            <span class="btn-ai-icon">✦</span> 분석 생성
+          </button>
+        </div>
+        <div class="ai-analysis-body" id="ai-analysis-body">
+          <p class="text-muted ai-placeholder">분석 생성 버튼을 눌러 이번 달 지출 패턴과 절약 조언을 받아보세요.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── BUDGET ─────────────────────────────── -->
+    <div id="tab-budget" class="tab-content">
+      <div class="month-nav">
+        <button class="btn-icon" id="budget-prev-month">&#8249;</button>
+        <span id="budget-month-label"></span>
+        <button class="btn-icon" id="budget-next-month">&#8250;</button>
+      </div>
+
+      <div class="budget-section">
+        <h3>카테고리별 예산</h3>
+        <div id="budget-list"></div>
+      </div>
+
+      <div class="budget-section">
+        <h3>저축 목표</h3>
+        <div class="savings-form">
+          <input type="number" id="savings-goal-input" placeholder="월 저축 목표 금액 (원)" min="0" />
+          <button class="btn-primary" id="savings-goal-save">저장</button>
+        </div>
+        <div id="savings-goal-display"></div>
+      </div>
+    </div>
+
+    <!-- ── SETTINGS ───────────────────────────── -->
+    <div id="tab-settings" class="tab-content">
+
+      <div class="settings-section">
+        <h3>테마</h3>
+        <label class="toggle-label">
+          <span>다크 모드</span>
+          <div class="toggle-wrap">
+            <input type="checkbox" id="dark-mode-toggle" />
+            <span class="toggle-slider"></span>
+          </div>
+        </label>
+      </div>
+
+      <div class="settings-section">
+        <h3>계좌 관리</h3>
+        <div class="account-list" id="account-list"></div>
+        <div class="add-row">
+          <input type="text" id="new-account" placeholder="새 계좌 이름" />
+          <button class="btn-primary" id="add-account-btn">추가</button>
+        </div>
+      </div>
+
+      <div class="settings-section">
+        <h3>반복 거래</h3>
+        <div id="recurring-list"></div>
+        <div class="recurring-form">
+          <input type="text" id="rec-desc" placeholder="항목명" />
+          <select id="rec-type">
+            <option value="income">수입</option>
+            <option value="expense">지출</option>
+          </select>
+          <select id="rec-category"></select>
+          <select id="rec-account"></select>
+          <input type="number" id="rec-amount" placeholder="금액" min="1" />
+          <input type="number" id="rec-day" placeholder="매월 N일" min="1" max="31" />
+          <button class="btn-primary" id="add-recurring-btn">추가</button>
+        </div>
+        <button class="btn-secondary" id="apply-recurring-btn">이번 달 반복 거래 적용</button>
+      </div>
+
+      <div class="settings-section">
+        <h3>데이터</h3>
+        <div class="data-btns">
+          <button class="btn-secondary" id="export-csv-btn">CSV 내보내기</button>
+          <label class="btn-secondary" for="import-csv-input">CSV 가져오기</label>
+          <input type="file" id="import-csv-input" accept=".csv" style="display:none" />
+        </div>
+      </div>
+
+      <div class="settings-section">
+        <h3>단축키</h3>
+        <div class="shortcuts">
+          <div><kbd>Ctrl</kbd> + <kbd>Enter</kbd> — 거래 추가</div>
+          <div><kbd>Ctrl</kbd> + <kbd>Z</kbd> — 삭제 취소</div>
+          <div><kbd>Ctrl</kbd> + <kbd>D</kbd> — 다크모드 전환</div>
+          <div><kbd>Esc</kbd> — 폼 초기화</div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>

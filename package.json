@@ -1,0 +1,8 @@
+{
+  "name": "money",
+  "version": "1.0.0",
+  "description": "AI 가계부 웹앱",
+  "dependencies": {
+    "openai": "^4.0.0"
+  }
+}
